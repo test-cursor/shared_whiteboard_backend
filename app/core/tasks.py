@@ -35,6 +35,8 @@ async def cleanup_inactive_rooms():
             session.commit()
     except Exception as e:
         logger.error(f"Error in cleanup_inactive_rooms: {str(e)}")
+        # Re-raise the exception to ensure the test fails if cleanup fails
+        raise
 
 async def periodic_cleanup():
     """Run cleanup every minute"""

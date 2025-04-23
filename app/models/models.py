@@ -20,7 +20,7 @@ class DrawingData(SQLModel, table=True):
 
 class UserSession(SQLModel, table=True):
     id: int = Field(default=None, primary_key=True)
-    token: str = Field(unique=True)
-    username: str
-    room_id: str = Field(foreign_key="room.id")
+    token: str = Field(unique=True, index=True)
+    username: str = Field(index=True)
+    room_id: Optional[str] = Field(default=None, foreign_key="room.id", nullable=True)
     last_active: datetime = Field(default_factory=datetime.utcnow) 

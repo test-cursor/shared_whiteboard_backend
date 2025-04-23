@@ -54,6 +54,9 @@ async def websocket_endpoint(
     username = payload["sub"]
     
     try:
+        # Initialize Redis service
+        await redis_service.init()
+        
         # Update user session
         user_session = session.exec(
             select(UserSession).where(UserSession.token == token)
@@ -70,6 +73,9 @@ async def websocket_endpoint(
         
         # Add user to Redis room
         await redis_service.add_user_to_room(room_id, token, username)
+        
+        # Send connection established message
+        await websocket.send_json({"type": "connection_established"})
         
         try:
             while True:

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "test-crud"
+version = "0.1.0"
+description = "FastAPI WebSocket Whiteboard Application"
+requires-python = ">=3.8"
+dependencies = [
+    "fastapi>=0.68.2",
+    "uvicorn>=0.15.0",
+    "sqlmodel",
+    "python-jose",
+    "python-dotenv",
+    "redis",
+]
+
+[tool.pytest.ini_options]
+pythonpath = [
+    "."
+]
+testpaths = [
+    "app/tests",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"] 
