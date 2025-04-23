@@ -4,14 +4,16 @@ from app.core.security import create_access_token
 from app.db.database import get_session
 from app.models.models import UserSession
 from app.schemas.auth import UserLogin, Token
+import uuid
 
 router = APIRouter()
 
 @router.post("/auth/login", response_model=Token)
 async def login(user: UserLogin, session: Session = Depends(get_session)):
-    # Simple login that just creates a token for the username
+    # Create token with both username and unique UUID
     token_data = {
         "sub": user.username,
+        "uuid": str(uuid.uuid4())  # Add unique identifier
     }
     
     access_token = create_access_token(token_data)

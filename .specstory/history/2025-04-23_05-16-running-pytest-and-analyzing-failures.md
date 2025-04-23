@@ -1311,6 +1311,204 @@ Would you like me to update the FAILING_TESTS.md with these corrected understand
 
 ---
 
+_**User**_
+
+yes, both username and uuid
+
+yes use a fixture for each test
+
+follow best practices for mocking to ensure that testing is easy
+
+yes. please mock the database within the websocket tests. tests should not affect the actual app data
+
+yes handle cleanup
+
+now, correct the FAILING_TESTS file to update our understanding
+
+---
+
+_**Assistant**_
+
+I'll update the FAILING_TESTS.md file with our corrected understanding and more detailed solutions.
+
+
+---
+
+```diff
+  
+  **Analysis**: 
+- - The test is failing because there's a unique constraint on the token column in the UserSession table
+- - When trying to create multiple sessions for the same user, the token uniqueness constraint is violated
+- - This suggests the current implementation doesn't properly handle multiple sessions for the same user
++ - The test is failing because the token generation is deterministic based on username
++ - Each login attempt for the same user generates an identical token due to the same token data being used
++ - The current implementation doesn't include a unique identifier in the token data
+  
+- **Potential Solutions**:
+- 1. Remove the unique constraint on the token column if multiple sessions per user are allowed
+- 2. Implement a session cleanup mechanism that removes old sessions before creating new ones
+- 3. Update the token generation logic to ensure uniqueness across all sessions
++ **Solution**:
++ 1. Modify token generation in `auth.py` to include both username and UUID in token data:
++ ```python
++ token_data = {
++     "sub": user.username,
++     "uuid": str(uuid.uuid4())  # Add unique identifier
++ }
++ ```
++ 2. This ensures each login attempt generates a unique token while maintaining user identification
+  
+  ## 2. test_room_cleanup (test_rooms.py)
+  
+  **Analysis**:
+- - The test is failing because the 'room' table doesn't exist in the database
+- - This suggests that either:
+-   - The database migrations haven't been run
+-   - The test database isn't being properly initialized
+-   - The table name in the code doesn't match the actual table name
+- 
+- **Potential Solutions**:
+- 1. Ensure database migrations are run before tests
+- 2. Check if the test database is being properly initialized in conftest.py
+- 3. Verify the table name matches between the model definition and the actual database
++ - The test is failing because we're not properly initializing the test database
++ - The in-memory SQLite database is not being set up correctly for testing
++ - We need proper database fixtures for test isolation
++ 
++ **Solution**:
++ 1. Create a database fixture in conftest.py:
++ ```python
++ @pytest.fixture
++ def test_db():
++     # Create in-memory SQLite database
++     engine = create_engine("sqlite:///:memory:")
++     Base.metadata.create_all(engine)
++     session = Session(engine)
++     yield session
++     session.close()
++ ```
++ 2. Ensure each test uses the test database fixture
++ 3. Add cleanup after each test to maintain test isolation
+  
+  ## 3. WebSocket Tests (test_websocket.py)
+  
+  All WebSocket tests are failing with the same error:
+  ```
+- redis.exceptions.ConnectionError: Error Multiple exceptions: [Errno 111] Connect call failed ('::1', 6379, 0, 0), [Errno 111] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379
++ redis.exceptions.ConnectionError: Error Multiple exceptions: [Errno 111] Connect call failed
+  ```
+  
+  
+  **Analysis**:
+- - All WebSocket tests are failing because they can't connect to Redis
+- - The error indicates that Redis server is not running on localhost:6379
+- - This is a common issue in test environments where Redis needs to be mocked or a test Redis instance needs to be started
+- 
+- **Potential Solutions**:
+- 1. Use a mock Redis service in tests (already implemented as mock_redis_service fixture)
+- 2. Start a Redis server specifically for tests
+- 3. Use a Redis Docker container for testing
+- 4. Ensure the mock Redis service is properly configured and used in the tests
++ - The tests are failing because we're directly using `redis_service` in room.py
++ - We need proper dependency injection and mocking for both Redis and database operations
++ - Tests should not affect actual application data
++ 
++ **Solution**:
++ 1. Create a Redis service interface/abstract class:
++ ```python
++ class RedisServiceInterface:
++     async def add_user_to_room(self, room_id: str, token: str, username: str):
++         raise NotImplementedError
++     # ... other methods
++ ```
++ 
++ 2. Modify room.py to use dependency injection:
++ ```python
++ @router.websocket("/ws/{room_id}")
++ async def websocket_endpoint(
++     websocket: WebSocket,
++     room_id: str,
++     token: str,
++     session: Session = Depends(get_session),
++     redis_service: RedisServiceInterface = Depends(get_redis_service)
++ ):
++     # ... implementation
++ ```
++ 
++ 3. Create test fixtures for both Redis and database:
++ ```python
++ @pytest.fixture
++ def mock_redis_service():
++     class MockRedisService(RedisServiceInterface):
++         # Implement mock methods
++         pass
++     return MockRedisService()
++ 
++ @pytest.fixture
++ def test_db():
++     # Create in-memory test database
++     pass
++ ```
++ 
++ 4. Ensure proper cleanup between tests:
++ ```python
++ @pytest.fixture(autouse=True)
++ def cleanup():
++     yield
++     # Clean up test data
++ ```
++ 
++ ## Implementation Steps
++ 
++ 1. **Auth Token Fix**:
++    - Add UUID to token generation
++    - Update token verification to handle new format
++    - Update tests to verify token uniqueness
++ 
++ 2. **Database Testing**:
++    - Create proper database fixtures
++    - Implement test database initialization
++    - Add cleanup procedures
++    - Update tests to use fixtures
++ 
++ 3. **WebSocket Testing**:
++    - Create Redis service interface
++    - Implement dependency injection
++    - Create mock implementations
++    - Update tests to use mocks
++    - Ensure test isolation
+  
+  ## Additional Warnings
+```
+
+---
+
+I've updated the FAILING_TESTS.md file with our corrected understanding and more detailed solutions. The key changes include:
+
+1. For the auth token issue:
+   - Added specific code example for including UUID in token generation
+   - Clarified that the issue is with deterministic token generation
+
+2. For the room cleanup test:
+   - Added specific fixture example for test database setup
+   - Emphasized the need for proper test isolation
+
+3. For WebSocket tests:
+   - Added detailed solution using dependency injection
+   - Included code examples for Redis service interface and mocking
+   - Added implementation steps for proper test setup
+
+4. Added a new "Implementation Steps" section to provide a clear roadmap for fixing these issues
+
+Would you like me to start implementing any of these solutions? We can begin with either:
+1. Adding UUID to the auth token generation
+2. Setting up proper database fixtures
+3. Implementing Redis service interface and dependency injection
+
+Which would you prefer to tackle first?
+
+---
+
 
 
 ---
