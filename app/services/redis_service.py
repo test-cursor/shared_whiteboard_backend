@@ -1,15 +1,16 @@
 import json
 from typing import Optional, Dict, List
-import aioredis
+from redis.asyncio import Redis
 from app.core.config import settings
 
 class RedisService:
     def __init__(self):
-        self.redis: Optional[aioredis.Redis] = None
+        self.redis: Optional[Redis] = None
 
     async def init(self):
-        self.redis = await aioredis.from_url(
-            f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}",
+        self.redis = Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
             password=settings.REDIS_PASSWORD,
             db=settings.REDIS_DB,
             decode_responses=True
