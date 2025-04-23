@@ -1,11 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from sqlmodel import Session, select
-from datetime import datetime, timedelta
+from datetime import datetime, UTC
 from app.core.security import verify_token
 from app.db.database import get_session
 from app.models.models import Room, UserSession
-from app.services.redis_service import redis_service
-from app.schemas.room import RoomCreate, RoomResponse, RoomState, WebSocketMessage, WebSocketResponse
+from app.services.redis_service import RedisServiceInterface
+from app.api.dependencies import get_redis_service
+from app.schemas.room import RoomCreate, RoomResponse, RoomState, WebSocketMessage, WebSocketResponse, Position
+from app.core.utils import DateTimeEncoder
+from pydantic import ValidationError
 import json
 
 router = APIRouter()
@@ -41,7 +44,8 @@ async def websocket_endpoint(
     websocket: WebSocket,
     room_id: str,
     token: str,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    redis_service: RedisServiceInterface = Depends(get_redis_service)
 ):
     await websocket.accept()
     
@@ -54,9 +58,6 @@ async def websocket_endpoint(
     username = payload["sub"]
     
     try:
-        # Initialize Redis service
-        await redis_service.init()
-        
         # Update user session
         user_session = session.exec(
             select(UserSession).where(UserSession.token == token)
@@ -67,7 +68,7 @@ async def websocket_endpoint(
             return
         
         user_session.room_id = room_id
-        user_session.last_active = datetime.utcnow()
+        user_session.last_active = datetime.now(UTC)
         session.add(user_session)
         session.commit()
         
@@ -80,29 +81,77 @@ async def websocket_endpoint(
         try:
             while True:
                 data = await websocket.receive_json()
-                message = WebSocketMessage(**data)
+                try:
+                    message = WebSocketMessage(**data)
+                except ValidationError as e:
+                    error_response = {
+                        "type": "error",
+                        "data": {
+                            "message": "Invalid message format",
+                            "details": str(e)
+                        }
+                    }
+                    await websocket.send_text(json.dumps(error_response))
+                    continue
                 
-                if message.type == "cursor_position":
-                    await redis_service.update_cursor_position(
-                        room_id, token, message.data
+                try:
+                    if message.type == "cursor_position":
+                        # Extract x and y from the data
+                        x = float(message.data["x"])
+                        y = float(message.data["y"])
+                        await redis_service.update_cursor_position(
+                            room_id, token, x, y
+                        )
+                        
+                    elif message.type == "drawing_action":
+                        await redis_service.add_drawing_action(
+                            room_id, message.data
+                        )
+                    else:
+                        error_response = {
+                            "type": "error",
+                            "data": {
+                                "message": "Invalid message type",
+                                "details": f"Unsupported message type: {message.type}"
+                            }
+                        }
+                        await websocket.send_text(json.dumps(error_response))
+                        continue
+                    
+                    # Broadcast to all clients in the room
+                    room_users = await redis_service.get_room_users(room_id)
+                    cursor_positions = await redis_service.get_cursor_positions(room_id)
+                    
+                    # Convert cursor positions to Position objects
+                    cursors = {
+                        user_id: {
+                            "x": pos["x"],
+                            "y": pos["y"],
+                            "timestamp": pos["timestamp"]
+                        }
+                        for user_id, pos in cursor_positions.items()
+                    }
+                    
+                    response = WebSocketResponse(
+                        users=room_users,
+                        cursors=cursors,
+                        last_action=message.data if message.type == "drawing_action" else None
                     )
                     
-                elif message.type == "drawing_action":
-                    await redis_service.add_drawing_action(
-                        room_id, message.data
-                    )
-                
-                # Broadcast to all clients in the room
-                room_users = await redis_service.get_room_users(room_id)
-                cursors = await redis_service.get_cursor_positions(room_id)
-                
-                response = WebSocketResponse(
-                    users=room_users,
-                    cursors=cursors,
-                    last_action=message.data
-                )
-                
-                await websocket.send_json(response.dict())
+                    # Serialize response with datetime handling
+                    json_response = json.dumps(response.dict(), cls=DateTimeEncoder)
+                    await websocket.send_text(json_response)
+                    
+                except Exception as e:
+                    error_response = {
+                        "type": "error",
+                        "data": {
+                            "message": "Error processing message",
+                            "details": str(e)
+                        }
+                    }
+                    await websocket.send_text(json.dumps(error_response))
+                    continue
                 
         except WebSocketDisconnect:
             # Clean up when user disconnects
@@ -112,7 +161,7 @@ async def websocket_endpoint(
             room = session.get(Room, room_id)
             if room:
                 room.active_user_count = max(0, room.active_user_count - 1)
-                room.last_activity = datetime.utcnow()
+                room.last_activity = datetime.now(UTC)
                 session.add(room)
                 session.commit()
     

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import asyncio
 import logging
 from sqlmodel import Session, select
@@ -9,34 +9,42 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-async def cleanup_inactive_rooms():
+async def cleanup_inactive_rooms(session: Session = None):
     """Clean up rooms that have been inactive for more than 5 minutes"""
     try:
-        with Session(engine) as session:
-            cutoff_time = datetime.utcnow() - timedelta(minutes=settings.ROOM_CLEANUP_MINUTES)
-            
-            # Find inactive rooms
-            inactive_rooms = session.exec(
-                select(Room).where(
-                    (Room.last_activity < cutoff_time) & 
-                    (Room.active_user_count == 0)
-                )
-            ).all()
-            
-            # Clean up each inactive room
-            for room in inactive_rooms:
-                # Clean up Redis data
-                await redis_service.delete_room_data(room.id)
-                
-                # Delete room from database
-                session.delete(room)
-                logger.info(f"Cleaned up inactive room: {room.id}")
-            
-            session.commit()
+        # Use provided session or create a new one
+        if session is None:
+            with Session(engine) as session:
+                await _cleanup_rooms(session)
+        else:
+            await _cleanup_rooms(session)
     except Exception as e:
         logger.error(f"Error in cleanup_inactive_rooms: {str(e)}")
         # Re-raise the exception to ensure the test fails if cleanup fails
         raise
+
+async def _cleanup_rooms(session: Session):
+    """Internal function to perform the actual cleanup"""
+    cutoff_time = datetime.now(UTC) - timedelta(minutes=settings.ROOM_CLEANUP_MINUTES)
+    
+    # Find inactive rooms
+    inactive_rooms = session.exec(
+        select(Room).where(
+            (Room.last_activity < cutoff_time) & 
+            (Room.active_user_count == 0)
+        )
+    ).all()
+    
+    # Clean up each inactive room
+    for room in inactive_rooms:
+        # Clean up Redis data
+        await redis_service.delete_room_data(room.id)
+        
+        # Delete room from database
+        session.delete(room)
+        logger.info(f"Cleaned up inactive room: {room.id}")
+    
+    session.commit()
 
 async def periodic_cleanup():
     """Run cleanup every minute"""

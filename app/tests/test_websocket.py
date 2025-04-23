@@ -4,6 +4,9 @@ from fastapi.testclient import TestClient
 from app.models.models import Room, UserSession
 from app.core.security import create_access_token
 from fastapi import WebSocketDisconnect
+from unittest.mock import AsyncMock, patch
+from datetime import datetime, UTC
+from app.services.redis_service import RedisServiceInterface
 
 @pytest.fixture
 def auth_token(session):
@@ -28,7 +31,8 @@ def test_room(client: TestClient, session):
     response = client.post("/api/v1/rooms")
     return response.json()["id"]
 
-def test_websocket_connection_success(
+@pytest.mark.asyncio
+async def test_websocket_connection_success(
     client: TestClient,
     websocket_client,
     auth_token,
@@ -55,7 +59,8 @@ def test_websocket_invalid_token(
         ) as websocket:
             websocket.receive_json()
 
-def test_websocket_cursor_position(
+@pytest.mark.asyncio
+async def test_websocket_cursor_position(
     client: TestClient,
     websocket_client,
     auth_token,
@@ -73,17 +78,22 @@ def test_websocket_cursor_position(
         cursor_data = {
             "type": "cursor_position",
             "data": {
-                "x": 100,
-                "y": 200,
-                "timestamp": "2024-03-14T12:00:00"
-            }
+                "x": 100.0,
+                "y": 200.0
+            },
+            "timestamp": datetime.now(UTC).isoformat()
         }
         websocket.send_json(cursor_data)
         
+        # Wait for response
+        response = websocket.receive_json()
+        
         # Verify cursor position was updated
         assert mock_redis_service.update_cursor_position.called
+        assert mock_redis_service.update_cursor_position.call_args[0] == (test_room, auth_token, 100.0, 200.0)
 
-def test_websocket_drawing_action(
+@pytest.mark.asyncio
+async def test_websocket_drawing_action(
     client: TestClient,
     websocket_client,
     auth_token,
@@ -103,14 +113,20 @@ def test_websocket_drawing_action(
             "data": {
                 "action": "draw",
                 "points": [[100, 100], [200, 200]]
-            }
+            },
+            "timestamp": datetime.now(UTC).isoformat()
         }
         websocket.send_json(drawing_data)
         
+        # Wait for response
+        response = websocket.receive_json()
+        
         # Verify drawing action was added
         assert mock_redis_service.add_drawing_action.called
+        assert mock_redis_service.add_drawing_action.call_args[0] == (test_room, drawing_data["data"])
 
-def test_websocket_disconnect_cleanup(
+@pytest.mark.asyncio
+async def test_websocket_disconnect_cleanup(
     client: TestClient,
     websocket_client,
     auth_token,
@@ -142,8 +158,14 @@ def test_websocket_invalid_message_format(
         websocket.receive_json()
         
         # Send invalid message
-        websocket.send_json({"invalid": "message"})
+        websocket.send_json({
+            "type": "invalid_type",
+            "data": {},
+            "timestamp": datetime.now(UTC).isoformat()
+        })
         
         # Should receive error message
         response = websocket.receive_json()
-        assert response["type"] == "error" 
+        assert response["type"] == "error"
+        assert "message" in response["data"]
+        assert "details" in response["data"] 

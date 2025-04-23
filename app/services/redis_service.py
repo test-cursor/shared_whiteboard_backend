@@ -1,9 +1,59 @@
+from abc import ABC, abstractmethod
 import json
 from typing import Optional, Dict, List
 from redis.asyncio import Redis
 from app.core.config import settings
 
-class RedisService:
+class RedisServiceInterface(ABC):
+    @abstractmethod
+    async def init(self):
+        pass
+
+    @abstractmethod
+    async def close(self):
+        pass
+
+    @abstractmethod
+    async def set_room_state(self, room_id: str, state: dict):
+        pass
+
+    @abstractmethod
+    async def get_room_state(self, room_id: str) -> Optional[dict]:
+        pass
+
+    @abstractmethod
+    async def add_user_to_room(self, room_id: str, user_id: str, username: str):
+        pass
+
+    @abstractmethod
+    async def remove_user_from_room(self, room_id: str, user_id: str):
+        pass
+
+    @abstractmethod
+    async def get_room_users(self, room_id: str) -> Dict[str, str]:
+        pass
+
+    @abstractmethod
+    async def update_cursor_position(self, room_id: str, user_id: str, position: dict):
+        pass
+
+    @abstractmethod
+    async def get_cursor_positions(self, room_id: str) -> Dict[str, dict]:
+        pass
+
+    @abstractmethod
+    async def add_drawing_action(self, room_id: str, action: dict):
+        pass
+
+    @abstractmethod
+    async def get_drawing_actions(self, room_id: str) -> List[dict]:
+        pass
+
+    @abstractmethod
+    async def delete_room_data(self, room_id: str):
+        pass
+
+class RedisService(RedisServiceInterface):
     def __init__(self):
         self.redis: Optional[Redis] = None
 
